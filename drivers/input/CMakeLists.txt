@@ -1,0 +1,3 @@
+zephyr_library_amend()
+
+zephyr_library_sources_ifdef(CONFIG_INPUT_AZOTEQ_IQS5XX iqs5xx.c)
