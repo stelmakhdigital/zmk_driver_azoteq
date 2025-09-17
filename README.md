@@ -26,34 +26,48 @@ This driver should work with any IQS5XX based trackpad for TPS43 model.
     };
 };
 
-&arduino_i2c {
+&i2c1 {
     status = "okay";
     tps43: iqs5xx@74 {
         status = "okay";
         compatible = "azoteq,iqs5xx";
         reg = <0x74>;
 
-        reset-gpios = <&arduino_header 14 GPIO_ACTIVE_LOW>;
-        rdy-gpios = <&arduino_header 15 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&pro_micro 14 GPIO_ACTIVE_LOW>;
+        rdy-gpios = <&pro_micro 15 GPIO_ACTIVE_HIGH>;
 
         /*
          * Potentially non-exhaustive list of configuration options.
          * See: dts/bindings/input/azoteq,iqs5xx-common.yaml for a full list.
          */
-        one-finger-tap;
-        press-and-hold;
+        one-finger-tap = <true>;
+        press-and-hold = <true>;
         press-and-hold-time = <250>;
-        two-finger-tap;
+        two-finger-tap = <true>;
 
-        scroll;
-        natural-scroll-y;
-        natural-scroll-x;
+        scroll = <true>;
+        natural-scroll-y = <true>;
+        natural-scroll-x = <true>;
 
         bottom-beta = <5>;
         stationary-threshold = <5>;
 
-        switch-xy;
+        switch-xy = <false>;
     };
 };
 ```
 
+> 5 pins are needed to configure the azoteq trackpad!
+
+Power:
+3V on the nice!nano -> VDD on the IQS5xx.
+G (Ground) on the nice!nano -> GND on the IQS5xx.
+
+
+I2C Signals:
+SDA (Feather pin labeled "SDA") on the nice!nano -> SDA on the IQS5xx.
+SCL (Feather pin labeled "SCL") on the nice!nano -> SCL on the IQS5xx.
+Data Ready / Interrupt Pin:
+
+The IQS5xx "DR" or "RDY" pin -> Any available GPIO on the nice!nano.
+For example, you can use D2, D3, or A0—whichever is free in your design. In devicetree, you’ll reference this pin under dr-gpios.
