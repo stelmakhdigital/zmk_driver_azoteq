@@ -40,19 +40,19 @@ This driver should work with any IQS5XX based trackpad for TPS43 model.
          * Potentially non-exhaustive list of configuration options.
          * See: dts/bindings/input/azoteq,iqs5xx-common.yaml for a full list.
          */
-        one-finger-tap = <true>;
-        press-and-hold = <true>;
+        one-finger-tap;
+        press-and-hold;
         press-and-hold-time = <250>;
-        two-finger-tap = <true>;
+        two-finger-tap;
 
-        scroll = <true>;
-        natural-scroll-y = <true>;
-        natural-scroll-x = <true>;
+        scroll;
+        natural-scroll-y;
+        natural-scroll-x;
 
         bottom-beta = <5>;
         stationary-threshold = <5>;
 
-        switch-xy = <false>;
+        switch-xy;
     };
 };
 ```
