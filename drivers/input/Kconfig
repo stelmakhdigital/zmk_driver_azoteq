@@ -1,20 +1,35 @@
-menuconfig INPUT_AZOTEQ_IQS5XX
-    bool "Azoteq IQS5xx trackpads"
-    default y
-    depends on GPIO
-    depends on I2C
-    depends on INPUT
-    depends on DT_HAS_AZOTEQ_IQS5XX_ENABLED
-    help
-      Enable driver for Azoteq IQS5xx trackpads.
+config ZMK_SENSOR_TPS43
+	bool "Azoteq TPS43 trackpad driver"
+	default y
+	select I2C
+	select SENSOR
+	help
+	  Enable driver for Azoteq TPS43 trackpad sensor.
 
-if INPUT_AZOTEQ_IQS5XX
+if ZMK_SENSOR_TPS43
 
-config INPUT_AZOTEQ_IQS5XX_INIT_PRIORITY
-    int "Azoteq IQS5xx initialization priority"
-    default INPUT_INIT_PRIORITY
-    help
-      Driver initialization priority for the IQS5xx driver.
-      Lower values initialize earlier.
+config ZMK_SENSOR_TPS43_GESTURE_SUPPORT
+	bool "Gesture support"
+	default n
+	help
+	  Enable gesture support.
 
-endif # INPUT_AZOTEQ_IQS5XX
+config ZMK_SENSOR_TPS43_POLL_RATE_MS
+	int "Poll rate (ms)"
+	default 10
+	help
+	  The time between sensor polls in milliseconds.
+
+config ZMK_SENSOR_TPS43_MAX_TOUCHES
+	int "Max touches"
+	default 5
+	help
+	  The maximum number of touches to report.
+
+config ZMK_SENSOR_TPS43_SENSITIVITY
+	int "Sensitivity"
+	default 40
+	help
+	  The sensitivity of the sensor.
+
+endif 
