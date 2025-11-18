@@ -28,27 +28,26 @@
  static int tps43_verify_device_id(const struct device *dev);
  static int tps43_configure_device(const struct device *dev);
  
-struct tps43_data {
-    struct k_work_delayable work;
-    struct k_mutex lock;
-    const struct device *dev;
-    
-    /* Touch data */
-    int16_t x;
-    int16_t y;
-    uint8_t touch_state;
-    uint8_t touch_strength;
-    
-    /* Device state */
-    bool device_ready;
-    bool initialized;
-    uint8_t error_count;
-    
-    /* Callbacks */
-    sensor_trigger_handler_t trigger_handler;
-    const struct sensor_trigger *trigger;
-    struct gpio_callback gpio_cb;
-};
+ struct tps43_data {
+     struct k_work_delayable work;
+     struct k_mutex lock;
+     const struct device *dev;
+     
+     /* Touch data */
+     int16_t x;
+     int16_t y;
+     uint8_t touch_state;
+     uint8_t touch_strength;
+     
+     /* Device state */
+     bool device_ready;
+     bool initialized;
+     uint8_t error_count;
+     
+     /* Callbacks */
+     sensor_trigger_handler_t trigger_handler;
+     const struct sensor_trigger *trigger;
+ };
  
  struct tps43_config {
      struct i2c_dt_spec i2c;
@@ -402,17 +401,13 @@ struct tps43_data {
      .trigger_set = tps43_trigger_set,
  };
  
-static int tps43_init(const struct device *dev)
-{
-    struct tps43_data *data = dev->data;
-    const struct tps43_config *config = dev->config;
-    int ret;
-    
-    LOG_INF("=== TPS43 driver init called for device %s ===", dev->name);
-    LOG_DBG("I2C bus: %s", config->i2c.bus ? config->i2c.bus->name : "NULL");
-    LOG_DBG("I2C address: 0x%02x", config->i2c.addr);
-    
-    data->dev = dev;
+ static int tps43_init(const struct device *dev)
+ {
+     struct tps43_data *data = dev->data;
+     const struct tps43_config *config = dev->config;
+     int ret;
+     
+     data->dev = dev;
      
      /* Initialize mutex */
      k_mutex_init(&data->lock);
@@ -420,13 +415,11 @@ static int tps43_init(const struct device *dev)
      /* Initialize work queue */
      k_work_init_delayable(&data->work, tps43_work_handler);
      
-    /* Check I2C bus readiness */
-    if (!i2c_is_ready_dt(&config->i2c)) {
-        LOG_ERR("I2C bus not ready for device %s", dev->name);
-        LOG_ERR("I2C bus name: %s", config->i2c.bus ? config->i2c.bus->name : "NULL");
-        return -ENODEV;
-    }
-    LOG_DBG("I2C bus is ready");
+     /* Check I2C bus readiness */
+     if (!i2c_is_ready_dt(&config->i2c)) {
+         LOG_ERR("I2C bus not ready");
+         return -ENODEV;
+     }
      
      /* Configure reset GPIO */
      if (gpio_is_ready_dt(&config->rst_gpio)) {
@@ -464,28 +457,23 @@ static int tps43_init(const struct device *dev)
      return 0;
  }
  
-#define TPS43_DEFINE(inst)                                                    \
-    static struct tps43_data tps43_data_##inst;                             \
+ #define TPS43_DEFINE(inst)                                                    \
+     static struct tps43_data tps43_data_##inst;                             \
                                                                               \
-    static const struct tps43_config tps43_config_##inst = {                \
-        .i2c = I2C_DT_SPEC_INST_GET(inst),                                 \
-        .int_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, int_gpios, {0}),        \
-        .rst_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, rst_gpios, {0}),        \
-        .resolution_x = DT_INST_PROP_OR(inst, resolution_x, 0),            \
-        .resolution_y = DT_INST_PROP_OR(inst, resolution_y, 0),            \
-        .invert_x = DT_INST_PROP(inst, invert_x),                          \
-        .invert_y = DT_INST_PROP(inst, invert_y),                          \
-        .swap_xy = DT_INST_PROP(inst, swap_xy),                            \
-    };                                                                       \
+     static const struct tps43_config tps43_config_##inst = {                \
+         .i2c = I2C_DT_SPEC_INST_GET(inst),                                 \
+         .int_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, int_gpios, {0}),        \
+         .rst_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, rst_gpios, {0}),        \
+         .resolution_x = DT_INST_PROP_OR(inst, resolution_x, 0),            \
+         .resolution_y = DT_INST_PROP_OR(inst, resolution_y, 0),            \
+         .invert_x = DT_INST_PROP(inst, invert_x),                          \
+         .invert_y = DT_INST_PROP(inst, invert_y),                          \
+         .swap_xy = DT_INST_PROP(inst, swap_xy),                            \
+     };                                                                       \
                                                                               \
-    SENSOR_DEVICE_DT_INST_DEFINE(inst, tps43_init, NULL,                   \
-                                &tps43_data_##inst, &tps43_config_##inst,   \
-                                POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,    \
-                                &tps43_driver_api);
-
-DT_INST_FOREACH_STATUS_OKAY(TPS43_DEFINE)
-
-/* Debug: Check if any instances were found at compile time */
-#if DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 0
-#warning "No TPS43 instances found in device tree! Check that status = \"okay\" is set."
-#endif
+     SENSOR_DEVICE_DT_INST_DEFINE(inst, tps43_init, NULL,                   \
+                                 &tps43_data_##inst, &tps43_config_##inst,   \
+                                 POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,    \
+                                 &tps43_driver_api);
+ 
+ DT_INST_FOREACH_STATUS_OKAY(TPS43_DEFINE) 
