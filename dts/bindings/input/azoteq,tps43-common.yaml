@@ -1,0 +1,94 @@
+
+properties:
+  variant:
+    type: string
+    description: |
+      Trackpad variant specification (e.g., "43mm" for 43mm trackpad).
+      
+  rdy-gpios:
+    type: phandle-array
+    description: |
+      Ready/Interrupt GPIO pin. This pin is asserted when touch data is available.
+      
+  int-gpios:
+    type: phandle-array
+    description: |
+      Interrupt GPIO pin. This pin is asserted when touch data is available.
+      
+  rst-gpios:
+    type: phandle-array  
+    description: |
+      Reset GPIO pin. Used to reset the device during initialization.
+      
+  resolution-x:
+    type: int
+    description: |
+      X resolution of the trackpad in counts. If not specified, defaults to 1024.
+      
+  resolution-y:
+    type: int
+    description: |
+      Y resolution of the trackpad in counts. If not specified, defaults to 1024.
+      
+  touch-threshold:
+    type: int
+    default: 40
+    description: |
+      Touch detection threshold. Lower values are more sensitive.
+      
+  max-touches:
+    type: int
+    default: 5
+    description: |
+      Maximum number of simultaneous touches (1-5).
+      
+  palm-reject-threshold:
+    type: int
+    default: 100
+    description: |
+      Palm rejection threshold. Touches larger than this value are ignored.
+      
+  gesture-enable:
+    type: boolean
+    description: |
+      Enable gesture recognition support.
+      
+  i2c-timeout-ms:
+    type: int
+    default: 10
+    description: |
+      I2C communication timeout in milliseconds.
+      
+  invert-x:
+    type: boolean
+    description: |
+      If present, invert X coordinate values.
+      
+  invert-y:
+    type: boolean
+    description: |
+      If present, invert Y coordinate values.
+      
+  swap-xy:
+    type: boolean
+    description: |
+      If present, swap X and Y coordinates.
+      
+  sensitivity:
+    type: int
+    default: 100
+    description: |
+      Sensitivity multiplier for touch movement (percentage). 100 = normal sensitivity, 
+      higher values = more sensitive (faster cursor movement), lower values = less sensitive.
+      Typical range: 50-200.
+      
+  debounce-ms:
+    type: int
+    default: 50
+    description: |
+      Debounce time in milliseconds for touch events.
+      
+  gesture-support:
+    type: boolean
+    description: |
+      Enable gesture recognition support (experimental). 

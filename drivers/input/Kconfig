@@ -1,20 +1,18 @@
-menuconfig INPUT_AZOTEQ_IQS5XX
-    bool "Azoteq IQS5xx trackpads"
-    default y
-    depends on GPIO
-    depends on I2C
-    depends on INPUT
-    depends on DT_HAS_AZOTEQ_IQS5XX_ENABLED
-    help
-      Enable driver for Azoteq IQS5xx trackpads.
+config INPUT_TPS43
+	bool "Azoteq TPS43 trackpad input driver"
+	default y
+	select I2C
+	select INPUT
+	help
+	  Enable input driver for Azoteq TPS43 trackpad pointing device.
 
-if INPUT_AZOTEQ_IQS5XX
+if INPUT_TPS43
 
-config INPUT_AZOTEQ_IQS5XX_INIT_PRIORITY
-    int "Azoteq IQS5xx initialization priority"
-    default INPUT_INIT_PRIORITY
-    help
-      Driver initialization priority for the IQS5xx driver.
-      Lower values initialize earlier.
+config INPUT_TPS43_SENSITIVITY
+	int "Sensitivity (percentage)"
+	default 100
+	range 1 500
+	help
+	  Sensitivity multiplier for touch movement. 100 = normal, higher = more sensitive.
 
-endif # INPUT_AZOTEQ_IQS5XX
+endif

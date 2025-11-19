@@ -1,0 +1,6 @@
+description: |
+  Input driver for Azoteq TPS43 trackpads, using the I2C interface
+
+compatible: "azoteq,tps43"
+
+include: ["i2c-device.yaml", "azoteq,tps43-common.yaml"]
