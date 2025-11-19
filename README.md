@@ -21,6 +21,12 @@ This driver should work with any IQS5XX based trackpad for TPS43 model.
 Added on a device with a touchpad...
 
 ```
+# Enable TPS43 input driver (pointing device)
+CONFIG_INPUT_TPS43=y
+CONFIG_INPUT_TPS43_SENSITIVITY=100
+```
+
+```
 &i2c0 {
     status = "okay";
     clock-frequency = <I2C_BITRATE_FAST>;
