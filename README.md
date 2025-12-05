@@ -24,12 +24,6 @@ CONFIG_INPUT_TPS43=y
 ```
 
 ```
-# Enable TPS43 input driver (pointing device)
-CONFIG_INPUT_TPS43=y
-CONFIG_INPUT_TPS43_SENSITIVITY=100
-```
-
-```
 &i2c0 {
     status = "okay";
     clock-frequency = <I2C_BITRATE_FAST>;

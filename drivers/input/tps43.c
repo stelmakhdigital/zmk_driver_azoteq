@@ -85,7 +85,7 @@ static int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *
     
     ret = i2c_write_read_dt(&config->i2c_bus, reg_buf, sizeof(reg_buf), val, 1);
     if (ret < 0) {
-        LOG_ERR("Failed to read register 0x%04x: %d", reg, ret);
+        LOG_ERR("Ошибка записи регистра 0x%04x: %d", reg, ret);
         return ret;
     }
     
