@@ -1,5 +1,5 @@
 description: |
-  Input driver for Azoteq TPS43 trackpads, using the I2C interface
+  Драйвер сенсора тачпада Azoteq TPS43 по интерфейсу I2C
 
 compatible: "azoteq,tps43"
 

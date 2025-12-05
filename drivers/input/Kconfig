@@ -1,18 +1,18 @@
 config INPUT_TPS43
-	bool "Azoteq TPS43 trackpad input driver"
-	default y
-	select I2C
-	select INPUT
-	help
-	  Enable input driver for Azoteq TPS43 trackpad pointing device.
+    bool "Azoteq TPS43 I2C Touchpad Input Device"
+    default y
+    depends on I2C
+    depends on INPUT
+    help
+      Включить драйвер для устройства ввода тачпада Azoteq по интерфейсу I2C.
+      Поддерживает мультитач-жесты, прокрутку, клики и управление питанием.
 
 if INPUT_TPS43
 
-config INPUT_TPS43_SENSITIVITY
-	int "Sensitivity (percentage)"
-	default 100
-	range 1 500
-	help
-	  Sensitivity multiplier for touch movement. 100 = normal, higher = more sensitive.
+config INPUT_TPS43_INIT_PRIORITY
+    int "Init priority"
+    default 90
+    help
+      Приоритет инициализации драйвера устройства.
 
-endif
+endif # ZMK_SENSOR_TPS43

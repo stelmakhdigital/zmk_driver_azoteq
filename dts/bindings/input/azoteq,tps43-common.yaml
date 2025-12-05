@@ -1,94 +1,88 @@
-
 properties:
-  variant:
-    type: string
-    description: |
-      Trackpad variant specification (e.g., "43mm" for 43mm trackpad).
-      
   rdy-gpios:
     type: phandle-array
-    description: |
-      Ready/Interrupt GPIO pin. This pin is asserted when touch data is available.
-      
-  int-gpios:
-    type: phandle-array
-    description: |
-      Interrupt GPIO pin. This pin is asserted when touch data is available.
-      
+    required: false
+    description: GPIO пин для сигнала прерывания RDY (Ready)
+
   rst-gpios:
-    type: phandle-array  
-    description: |
-      Reset GPIO pin. Used to reset the device during initialization.
-      
-  resolution-x:
+    type: phandle-array
+    required: false
+    description: GPIO пин для сигнала сброса RST (Reset)
+
+  suspend-timeout-ms:
     type: int
-    description: |
-      X resolution of the trackpad in counts. If not specified, defaults to 1024.
-      
-  resolution-y:
+    required: false
+    default: 30000
+    description: Таймаут в миллисекундах перед переходом в режим приостановки (0 для отключения)
+
+  sensitivity:
     type: int
-    description: |
-      Y resolution of the trackpad in counts. If not specified, defaults to 1024.
-      
-  touch-threshold:
-    type: int
-    default: 40
-    description: |
-      Touch detection threshold. Lower values are more sensitive.
-      
-  max-touches:
-    type: int
-    default: 5
-    description: |
-      Maximum number of simultaneous touches (1-5).
-      
-  palm-reject-threshold:
-    type: int
+    required: false
     default: 100
-    description: |
-      Palm rejection threshold. Touches larger than this value are ignored.
-      
-  gesture-enable:
-    type: boolean
-    description: |
-      Enable gesture recognition support.
-      
-  i2c-timeout-ms:
+    description: Процент чувствительности касания (100 = нормальная, больше = более чувствительная)
+
+  scroll-sensitivity:
     type: int
-    default: 10
-    description: |
-      I2C communication timeout in milliseconds.
-      
+    required: false
+    default: 50
+    description: Процент чувствительности прокрутки (50 = нормальная, больше = более чувствительная)
+
+  enable-power-management:
+    type: boolean
+    required: false
+    description: Включить автоматическое управление питанием (приостановка/возобновление)
+
+  single-tap:
+    type: boolean
+    required: false
+    description: Включить жест одиночного касания
+
+  two-finger-tap:
+    type: boolean
+    required: false
+    description: Включить жест касания двумя пальцами
+
+  scroll:
+    type: boolean
+    required: false
+    description: Включить жест прокрутки
+
+  invert-x:
+    type: boolean
+    required: false
+    description: Инвертировать ось X
+
+  invert-y:
+    type: boolean
+    required: false
+    description: Инвертировать ось Y
+
+  switch-xy:
+    type: boolean
+    required: false
+    description: Поменять местами оси X и Y
+
+  press-and-hold:
+    type: boolean
+    required: false
+    description: Включить жест нажатия и удержания
+
   invert-x:
     type: boolean
     description: |
-      If present, invert X coordinate values.
+      Если присутствует, инвертировать значения координаты X.
       
   invert-y:
     type: boolean
     description: |
-      If present, invert Y coordinate values.
+      Если присутствует, инвертировать значения координаты Y.
       
-  swap-xy:
+  invert-scroll-x:
     type: boolean
     description: |
-      If present, swap X and Y coordinates.
-      
-  sensitivity:
-    type: int
-    default: 100
-    description: |
-      Sensitivity multiplier for touch movement (percentage). 100 = normal sensitivity, 
-      higher values = more sensitive (faster cursor movement), lower values = less sensitive.
-      Typical range: 50-200.
-      
-  debounce-ms:
-    type: int
-    default: 50
-    description: |
-      Debounce time in milliseconds for touch events.
-      
-  gesture-support:
+      Если присутствует, инвертировать значения прокрутки по X.
+            
+  invert-scroll-y:
     type: boolean
     description: |
-      Enable gesture recognition support (experimental). 
+      Если присутствует, инвертировать значения прокрутки по Y.

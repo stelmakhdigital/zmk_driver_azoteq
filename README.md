@@ -1,24 +1,27 @@
-# ZMK driver for Azoteq IQS5XX trackpads
+# Драйвер ZMK для тачпадов Azoteq IQS5XX
 
-## Compatibility
+## Совместимость
 
-This driver should work with any IQS5XX based trackpad for TPS43 model.
+Этот драйвер должен работать с любым тачпадом на базе IQS5XX (TPS43 или TPS65).
 
-## Support
+## Поддержка
 
-- Trackpad movement.
-- Single finger tap: Reported as a left click.
-- Two finger tap: Reported as a right click.
-- Press and hold: Reported as a continuos left click (allows click and drag).
-- Vertical scroll.
-- Horizontal scroll.
+- Движение тачпада.
+- Одиночное касание: регистрируется как левый клик.
+- Касание двумя пальцами: регистрируется как правый клик.
+- Нажатие и удержание: регистрируется как непрерывный левый клик (перетаскивание).
+- Вертикальная прокрутка.
+- Горизонтальная прокрутка.
 
-## Usage
+## Использование
 
-- Specify a node with the "azoteq,iqs5xx" compatible inside an i2c node in your keyboard overlay.
-- Reference it from an input listener:
+- Укажите узел с совместимостью "azoteq,tps43" внутри узла i2c в оверлее клавиатуры.
+- Ссылайтесь на него из слушателя ввода:
 
-Added on a device with a touchpad...
+
+```
+CONFIG_INPUT_TPS43=y
+```
 
 ```
 &i2c0 {
@@ -33,48 +36,42 @@ Added on a device with a touchpad...
         reg = <0x74>;
         status = "okay";
         
-        /* Device variant and resolution */
-        variant = "43mm";                    /* 43mm x 40mm trackpad */
-        resolution-x = <2048>;               /* X-axis resolution */
-        resolution-y = <1792>;               /* Y-axis resolution */
-        
-        /* GPIO connections (adjust pin numbers for your board) */
-        int-gpios = <&pro_micro 21 GPIO_ACTIVE_HIGH>;  /* interrupt pin */
+        /* GPIO connections */
+        rdy-gpios = <&pro_micro 21 GPIO_ACTIVE_HIGH>;  /* Ready pin */
         rst-gpios = <&pro_micro 20 GPIO_ACTIVE_HIGH>;  /* Reset pin */
+
+        suspend-timeout-ms = <60000>;  /* 60 seconds */
+        enable-power-management;
         
-        /* Touch detection settings */
-        touch-threshold = <40>;              /* Touch sensitivity (lower = more sensitive) */
-        max-touches = <5>;                   /* Maximum simultaneous touches */
-        palm-reject-threshold = <100>;       /* Ignore touches larger than this */
-        
-        /* Feature enablement */
-        gesture-enable;                      /* Enable gesture recognition */
-        
-        /* Communication settings */
-        i2c-timeout-ms = <10>;               /* I2C timeout in milliseconds */
-        
-        /* Input driver settings */
-        sensitivity = <100>;                  /* Sensitivity multiplier (percentage) */
+        sensitivity = <110>;           /* 100% = normal */
+        scroll-sensitivity = <15>;     /* 50% = normal */
+
+        scroll;
+        two-finger-tap;
+        single-tap;
+        press-and-hold;
+
+        switch-xy;
+        invert-scroll-y;
     };
 };
-
 ```
 
 
-Only if there is one device (Central)
+Только если одно устройство (Центральное)
 
 ```
 / {
     tps43_input: tps43_input {
         compatible = "zmk,input-listener";
-        device = <&tps43>;
+        device = <&tps43_trackpad>;
     };
 };
 ```
 
-Only if there is SPLIT device
+Только если SPLIT устройство
 
-> Central
+> Центральное
 ```
 / {
     split_inputs {
@@ -84,7 +81,7 @@ Only if there is SPLIT device
         tps43_split: tps43_split@0 {
             compatible = "zmk,input-split";
             reg = <0>;
-            /* No device property here - this is a proxy on central side */
+            /* Здесь нет свойства device - это прокси на центральной стороне */
         };
     };
 
@@ -96,7 +93,7 @@ Only if there is SPLIT device
 };
 ```
 
-> Peripheral
+> Периферийное
 ```
 / {
     split_inputs {
@@ -113,17 +110,47 @@ Only if there is SPLIT device
 ```
 
 
-> 5 pins are needed to configure the azoteq trackpad!
+> Для настройки тачпада Azoteq требуется 5 пинов!
 
-Power:
-3V on the nice!nano -> VDD on the IQS5xx.
-G (Ground) on the nice!nano -> GND on the IQS5xx.
+Питание:
+3V на nice!nano -> VDD на IQS5xx.
+G (Земля) на nice!nano -> GND на IQS5xx.
 
 
-I2C Signals:
-SDA (Feather pin labeled "SDA") on the nice!nano -> SDA on the IQS5xx.
-SCL (Feather pin labeled "SCL") on the nice!nano -> SCL on the IQS5xx.
-Data Ready / Interrupt Pin:
+Сигналы I2C:
+SDA на nice!nano -> SDA на IQS5xx.
+SCL на nice!nano -> SCL на IQS5xx.
 
-The IQS5xx "DR" or "RDY" pin -> Any available GPIO on the nice!nano.
-For example, you can use D2, D3, or A0—whichever is free in your design. In devicetree, you’ll reference this pin under dr-gpios.
+Пин готовности данных / прерывания:
+
+Пин "DR" или "RDY" на IQS5xx -> Любой доступный GPIO на nice!nano. В devicetree этот пин указывается как rdy-gpios.
+
+Пин "RST" используется для инициализации сбоса устройства.
+
+
+## Правильная последовательность работы драйвера
+
+```txt
+1. Включение питания / Аппаратный сброс
+   └─> Ожидание 10мс
+   └─> RST: LOW (10мс) → HIGH
+   └─> Ожидание ~600мс для загрузки прошивки
+
+2. Проверка флага SHOW_RESET (0x000F бит 0)
+   └─> Опрос до появления флага
+
+3. Подтверждение сброса
+   └─> Запись ACK_RESET (0x0431 = 0x80)
+
+4. Конфигурация устройства
+   └─> System Config 1 (0x058F) - режимы событий
+   └─> XY Config (0x0669) - настройки осей
+   └─> Настройки фильтров, жестов и т.д.
+
+5. Завершение настройки
+   └─> Запись SETUP_COMPLETE (0x058E = 0x40)
+
+6. Конфигурация прерывания GPIO (RDY)
+   └─> ПОСЛЕ полной конфигурации
+
+```
