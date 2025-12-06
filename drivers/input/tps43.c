@@ -766,7 +766,7 @@ static int tps43_init(const struct device *dev) {
         .invert_y = DT_INST_PROP(inst, invert_y),                                                    \
         .switch_xy = DT_INST_PROP(inst, switch_xy),                                                  \
         .invert_scroll_x = DT_INST_PROP(inst, invert_scroll_x),                                      \
-        .invert_scroll_y = DT_INST_PROP(inst, invert_scroll_x),                                      \
+        .invert_scroll_y = DT_INST_PROP(inst, invert_scroll_y),                                      \
         .sensitivity = DT_INST_PROP_OR(inst, sensitivity, 100),                                      \
         .scroll_sensitivity = DT_INST_PROP_OR(inst, scroll_sensitivity, 50),                         \
         .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),            \
