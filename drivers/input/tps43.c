@@ -198,6 +198,9 @@ static int tps43_i2c_write_reg8(const struct device *dev, uint16_t reg, uint8_t 
  * преобразуя их в события ввода для системы ZMK.
  * Также управляет пробуждением тачпада из режима suspend при обнаружении активности.
  * 
+ * Защищен семафором для предотвращения прерывания другими операциями I2C,
+ * что обеспечивает плавное движение курсора без прерываний.
+ * 
  * @param work Указатель на структуру работы
  */
 static void tps43_work_handler(struct k_work *work) {
@@ -206,21 +209,17 @@ static void tps43_work_handler(struct k_work *work) {
     const struct tps43_config *config = dev->config;
     int ret;
 
+    // Захватываем семафор для защиты всех операций I2C от прерывания
+    // Это предотвращает конфликты при одновременном доступе к тачпаду
+    k_sem_take(&drv_data->lock, K_FOREVER);
+
     // Обновляем время последней активности для управления питанием
     drv_data->last_activity_time = k_uptime_get_32();
     
     // Если устройство было в suspend, пробуждаем его
+    // Используем lock_held=true, так как семафор уже захвачен
     if (drv_data->suspended && config->enable_power_management) {
-        uint8_t control_reg = 0;
-        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
-        if (ret == 0) {
-            control_reg &= ~TPS43_SUSPEND;
-            ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
-            if (ret == 0) {
-                drv_data->suspended = false;
-                LOG_INF("Тачпад пробужден по активности");
-            }
-        }
+        tps43_set_suspend_internal(dev, false, true);
     }
 
     // Определяем события
@@ -329,6 +328,9 @@ done:
     drv_data->scroll_active = is_scroll_active;
     drv_data->drag_active = is_drag_active;
     tps43_end_communication_window(dev);
+    
+    // Освобождаем семафор после завершения всех операций I2C
+    k_sem_give(&drv_data->lock);
 }
 
 /**
@@ -512,8 +514,19 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
         return 0;
     }
 
+    // Захватываем семафор, если он еще не захвачен
+    if (!lock_held) {
+        if (k_sem_take(&drv_data->lock, K_MSEC(100)) != 0) {
+            LOG_WRN("Не удалось захватить семафор для suspend/resume");
+            return -EBUSY;
+        }
+    }
+
     // Проверяем, не пытаемся ли установить то же состояние
     if (drv_data->suspended == suspend) {
+        if (!lock_held) {
+            k_sem_give(&drv_data->lock);
+        }
         return 0;
     }
 
@@ -523,7 +536,7 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
     if (ret != 0) {
         LOG_ERR("Ошибка чтения регистра SYSTEM_CONTROL_1: %d", ret);
-        return ret;
+        goto done;
     }
 
     // Устанавливаем или снимаем бит SUSPEND
@@ -539,7 +552,7 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
     if (ret != 0) {
         LOG_ERR("Ошибка записи регистра SYSTEM_CONTROL_1: %d", ret);
-        return ret;
+        goto done;
     }
 
     // Обновляем внутреннее состояние
@@ -553,7 +566,13 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     // Завершаем окно связи (обязательно после каждой операции I2C)
     tps43_end_communication_window(dev);
 
-    return 0;
+done:
+    // Освобождаем семафор, если мы его захватывали
+    if (!lock_held) {
+        k_sem_give(&drv_data->lock);
+    }
+
+    return 0
 }
 
 /**
@@ -596,18 +615,18 @@ static void tps43_suspend_work_handler(struct k_work *work) {
     // Если время бездействия превысило таймаут и устройство не в suspend - переводим в suspend
     if (inactive_time >= config->suspend_timeout_ms && !drv_data->suspended) {
         LOG_INF("Автоматический переход в suspend после %d мс бездействия", inactive_time);
-        tps43_set_suspend_internal(dev, true, false);
+        tps43_set_suspend(dev, true);
     }
     // Если время бездействия меньше таймаута и устройство в suspend - пробуждаем
     // (это может произойти, если активность была обнаружена через прерывание RDY)
     else if (inactive_time < config->suspend_timeout_ms && drv_data->suspended) {
         LOG_INF("Автоматическое пробуждение из suspend (обнаружена активность)");
-        tps43_set_suspend_internal(dev, false, false);
+        tps43_set_suspend(dev, false);
     }
 
-    // Планируем следующую проверку через 1 секунду (если таймаут задан)
+    // Планируем следующую проверку через 10 секунд (если таймаут задан)
     if (config->suspend_timeout_ms > 0) {
-        k_work_schedule(&drv_data->suspend_work, K_MSEC(1000));
+        k_work_schedule(&drv_data->suspend_work, K_MSEC(10000));
     }
 }
 
@@ -695,14 +714,19 @@ static int tps43_init(const struct device *dev) {
     drv_data->suspended = false;
     drv_data->last_activity_time = k_uptime_get_32();
 
+    // Инициализируем семафор для защиты операций I2C
+    // Первый параметр - начальное количество (1 = доступен)
+    // Второй параметр - максимальное количество (1 = бинарный семафор)
+    k_sem_init(&drv_data->lock, 1, 1);
+
     k_work_init(&drv_data->work, tps43_work_handler);
     
     // Инициализируем отложенную работу для автоматического suspend
     // если включено управление питанием и задан таймаут
     if (config->enable_power_management && config->suspend_timeout_ms > 0) {
         k_work_init_delayable(&drv_data->suspend_work, tps43_suspend_work_handler);
-        // Запускаем первую проверку через 1 секунду
-        k_work_schedule(&drv_data->suspend_work, K_MSEC(1000));
+        // Запускаем первую проверку через 10 секунд
+        k_work_schedule(&drv_data->suspend_work, K_MSEC(10000));
         LOG_INF("Автоматическое управление питанием включено (таймаут: %d мс)", 
                 config->suspend_timeout_ms);
     }
