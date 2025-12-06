@@ -427,6 +427,14 @@ static int tps43_configure_device(const struct device *dev) {
         LOG_INF("Мульти-жесты включены: 0x%02X", multi_gestures);
     }
 
+    // конфигурация фильтров
+    ret = tps43_i2c_write_reg8(dev, TPS43_REG_FILTER_SETTINGS, config->filter_settings);
+    if (ret != 0) {
+        LOG_WRN("Ошибка записи настроек фильтров: %d", ret);
+        return ret;
+    }
+    LOG_INF("Настройки фильтров установлены: 0x%02X", config->filter_settings);
+
     // установка признака завершения конфигурации
     ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONFIG_0, TPS43_SETUP_COMPLETE);
     if (ret != 0) {
@@ -763,6 +771,7 @@ static int tps43_init(const struct device *dev) {
         .scroll_sensitivity = DT_INST_PROP_OR(inst, scroll_sensitivity, 50),                         \
         .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),            \
         .suspend_timeout_ms = DT_INST_PROP_OR(inst, suspend_timeout_ms, 0),                         \
+        .filter_settings = DT_INST_PROP_OR(inst, filter_settings, 0x0F),                            \
     };                                                                                               \
                                                                                                      \
     DEVICE_DT_INST_DEFINE(inst, tps43_init, NULL, &tps43_##inst##_drvdata, &tps43_##inst##_config,   \

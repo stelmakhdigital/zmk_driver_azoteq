@@ -171,6 +171,8 @@ struct tps43_config {
 
     bool enable_power_management;
     int32_t suspend_timeout_ms;  /* 0 = отключено */
+    
+    uint8_t filter_settings;
 };
 
 struct tps43_drv_data {
