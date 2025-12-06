@@ -11,11 +11,21 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/logging/log.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #include "tps43.h"
 
 LOG_MODULE_REGISTER(tps43, CONFIG_INPUT_LOG_LEVEL);
  
+/**
+ * @brief Завершает окно связи с тачпадом
+ * 
+ * После каждого чтения регистров тачпада необходимо завершить окно связи,
+ * записав специальный адрес 0xEEEE, что вызывает NACK от устройства.
+ * Это обязательный шаг согласно протоколу IQS5xx.
+ * 
+ * @param dev Указатель на устройство тачпада
+ */
 static void tps43_end_communication_window(const struct device *dev) {
     const struct tps43_config *config = dev->config;
     uint8_t end_buf[2];
@@ -28,6 +38,19 @@ static void tps43_end_communication_window(const struct device *dev) {
     }
 }
 
+/**
+ * @brief Читает последовательность регистров тачпада
+ * 
+ * Выполняет чтение нескольких байт из последовательных регистров тачпада,
+ * начиная с указанного адреса. Используется для чтения связанных регистров,
+ * таких как события жестов (GESTURE_EVENTS_0 и GESTURE_EVENTS_1).
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param reg Адрес начального регистра (16-битный)
+ * @param val Указатель на буфер для данных
+ * @param len Количество байт для чтения
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int read_sequence_registers(const struct device *dev, uint16_t reg, void *val, size_t len) {
     const struct tps43_config *config = dev->config;
     uint8_t addr_buf[2];
@@ -37,7 +60,17 @@ static int read_sequence_registers(const struct device *dev, uint16_t reg, void 
     return i2c_write_read_dt(&config->i2c_bus, addr_buf, 2, val, len);
 }
 
-
+/**
+ * @brief Читает 16-битный регистр тачпада через I2C
+ * 
+ * Выполняет чтение 16-битного значения из указанного регистра тачпада.
+ * Данные интерпретируются как big-endian (MSB first).
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param reg Адрес регистра (16-битный)
+ * @param val Указатель на переменную для сохранения прочитанного значения
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int tps43_i2c_read_reg16(const struct device *dev, uint16_t reg, uint16_t *val)
 {
     const struct tps43_config *config = dev->config;
@@ -60,6 +93,17 @@ static int tps43_i2c_read_reg16(const struct device *dev, uint16_t reg, uint16_t
     return 0;
 }
 
+/**
+ * @brief Записывает 16-битное значение в регистр тачпада через I2C
+ * 
+ * Выполняет запись 16-битного значения в указанный регистр тачпада.
+ * Данные передаются как big-endian (MSB first).
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param reg Адрес регистра (16-битный)
+ * @param val Значение для записи (16-битное)
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int tps43_i2c_write_reg16(const struct device *dev, uint16_t reg, uint16_t val)
 {
     const struct tps43_config *config = dev->config;
@@ -76,6 +120,17 @@ static int tps43_i2c_write_reg16(const struct device *dev, uint16_t reg, uint16_
     return 0;
 }
 
+/**
+ * @brief Читает 8-битный регистр тачпада через I2C
+ * 
+ * Выполняет чтение 8-битного значения из указанного регистра тачпада.
+ * Используется для чтения большинства регистров конфигурации и статуса.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param reg Адрес регистра (16-битный)
+ * @param val Указатель на переменную для сохранения прочитанного значения
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *val)
 {
     const struct tps43_config *config = dev->config;
@@ -92,6 +147,17 @@ static int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *
     return 0;
 }
 
+/**
+ * @brief Записывает 8-битное значение в регистр тачпада через I2C
+ * 
+ * Выполняет запись 8-битного значения в указанный регистр тачпада.
+ * Используется для записи регистров конфигурации и управления.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param reg Адрес регистра (16-битный)
+ * @param val Значение для записи (8-битное)
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int tps43_i2c_write_reg8(const struct device *dev, uint16_t reg, uint8_t val)
 {
     const struct tps43_config *config = dev->config;
@@ -107,17 +173,55 @@ static int tps43_i2c_write_reg8(const struct device *dev, uint16_t reg, uint8_t 
     return 0;
 }
 
+/**
+ * @brief Callback обработчик прерывания от пина RDY тачпада
+ * 
+ * Вызывается при изменении состояния пина RDY (Ready) тачпада,
+ * который сигнализирует о наличии новых данных для чтения.
+ * Планирует выполнение обработчика работы для чтения данных.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param cb Указатель на структуру callback GPIO
+ * @param pins Маска пинов, вызвавших прерывание
+ */
  static void tps43_rdy_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
      struct tps43_drv_data *drv_data = CONTAINER_OF(cb, struct tps43_drv_data, rdy_cb);
  
      k_work_submit(&drv_data->work);
  }
  
+/**
+ * @brief Основной обработчик работы для обработки событий тачпада
+ * 
+ * Выполняется при получении прерывания от тачпада (RDY pin).
+ * Читает и обрабатывает события жестов, движения курсора и прокрутки,
+ * преобразуя их в события ввода для системы ZMK.
+ * Также управляет пробуждением тачпада из режима suspend при обнаружении активности.
+ * 
+ * @param work Указатель на структуру работы
+ */
 static void tps43_work_handler(struct k_work *work) {
     struct tps43_drv_data *drv_data = CONTAINER_OF(work, struct tps43_drv_data, work);
     const struct device *dev = drv_data->dev;
     const struct tps43_config *config = dev->config;
     int ret;
+
+    // Обновляем время последней активности для управления питанием
+    drv_data->last_activity_time = k_uptime_get_32();
+    
+    // Если устройство было в suspend, пробуждаем его
+    if (drv_data->suspended && config->enable_power_management) {
+        uint8_t control_reg = 0;
+        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+        if (ret == 0) {
+            control_reg &= ~TPS43_SUSPEND;
+            ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
+            if (ret == 0) {
+                drv_data->suspended = false;
+                LOG_INF("Тачпад пробужден по активности");
+            }
+        }
+    }
 
     // Определяем события
     bool is_scroll_active = drv_data->scroll_active;
@@ -227,7 +331,15 @@ done:
     tps43_end_communication_window(dev);
 }
 
-
+/**
+ * @brief Сбрасывает внутренние значения состояния драйвера
+ * 
+ * Инициализирует все флаги состояния драйвера в начальные значения.
+ * Используется при инициализации и сбросе устройства.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @return 0 при успехе
+ */
 static int tps43_reset_values(const struct device *dev) {
     struct tps43_drv_data *drv_data = dev->data;
 
@@ -240,10 +352,17 @@ static int tps43_reset_values(const struct device *dev) {
     return 0;
 }
 
+/**
+ * @brief Конфигурирует системные регистры тачпада для работы
+ * 
+ * Настраивает регистры тачпада для отслеживания событий касания, жестов и движения.
+ * Включает необходимые жесты (single tap, press and hold, scroll, two finger tap),
+ * настраивает инверсию осей и устанавливает флаг завершения настройки.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int tps43_configure_device(const struct device *dev) {
-    /*
-        Конфигурация системных регистров для дальнейшего отслеживания событий и жестов
-    */
 
     const struct tps43_config *config = dev->config;
     int ret;
@@ -316,6 +435,16 @@ static int tps43_configure_device(const struct device *dev) {
     return 0;
 }
 
+/**
+ * @brief Проверяет состояние сброса устройства и выполняет реконфигурацию
+ * 
+ * Ожидает готовности устройства после сброса, проверяет флаг SHOW_RESET
+ * и отправляет подтверждение сброса (ACK_RESET) при необходимости.
+ * Затем выполняет полную конфигурацию устройства.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int check_reset_and_reconfigure(const struct device *dev) {
     struct tps43_drv_data *drv_data = dev->data;
     int ret;
@@ -360,6 +489,139 @@ static int check_reset_and_reconfigure(const struct device *dev) {
     return 0;
 }
 
+
+/**
+ * @brief Внутренняя функция для перевода тачпада в режим suspend/resume
+ * 
+ * Управляет регистром SYSTEM_CONTROL_1 (0x0432), устанавливая или снимая бит SUSPEND.
+ * В режиме suspend тачпад переходит в состояние низкого энергопотребления и не обрабатывает
+ * касания до пробуждения.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param suspend true - перевести в suspend, false - вывести из suspend
+ * @param lock_held true если семафор уже захвачен (для внутреннего использования)
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
+static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bool lock_held) {
+    struct tps43_drv_data *drv_data = dev->data;
+    const struct tps43_config *config = dev->config;
+    int ret = 0;
+
+    // Если управление питанием отключено, ничего не делаем
+    if (!config->enable_power_management) {
+        return 0;
+    }
+
+    // Проверяем, не пытаемся ли установить то же состояние
+    if (drv_data->suspended == suspend) {
+        return 0;
+    }
+
+    // Читаем текущее значение регистра SYSTEM_CONTROL_1
+    // ВАЖНО: SUSPEND находится в регистре SYSTEM_CONTROL_1, а не SYSTEM_CONTROL_0!
+    uint8_t control_reg = 0;
+    ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+    if (ret != 0) {
+        LOG_ERR("Ошибка чтения регистра SYSTEM_CONTROL_1: %d", ret);
+        return ret;
+    }
+
+    // Устанавливаем или снимаем бит SUSPEND
+    if (suspend) {
+        control_reg |= TPS43_SUSPEND;
+        LOG_INF("Перевод тачпада в режим suspend (низкое энергопотребление)");
+    } else {
+        control_reg &= ~TPS43_SUSPEND;
+        LOG_INF("Пробуждение тачпада из режима suspend");
+    }
+
+    // Записываем обновленное значение регистра
+    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
+    if (ret != 0) {
+        LOG_ERR("Ошибка записи регистра SYSTEM_CONTROL_1: %d", ret);
+        return ret;
+    }
+
+    // Обновляем внутреннее состояние
+    drv_data->suspended = suspend;
+    
+    // Если пробуждаем, обновляем время активности
+    if (!suspend) {
+        drv_data->last_activity_time = k_uptime_get_32();
+    }
+
+    // Завершаем окно связи (обязательно после каждой операции I2C)
+    tps43_end_communication_window(dev);
+
+    return 0;
+}
+
+/**
+ * @brief Публичная функция для перевода тачпада в suspend/resume
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param suspend true - перевести в suspend, false - вывести из suspend
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
+static int tps43_set_suspend(const struct device *dev, bool suspend) {
+    return tps43_set_suspend_internal(dev, suspend, false);
+}
+ 
+/**
+ * @brief Обработчик отложенной работы для автоматического перевода в suspend
+ * 
+ * Эта функция периодически проверяет время бездействия тачпада и автоматически
+ * переводит его в режим suspend, если прошло достаточно времени без активности.
+ * Также пробуждает тачпад, если обнаружена активность.
+ * 
+ * Работает только если suspend_timeout_ms > 0 и enable_power_management = true.
+ * 
+ * @param work Указатель на отложенную работу
+ */
+static void tps43_suspend_work_handler(struct k_work *work) {
+    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct tps43_drv_data *drv_data = CONTAINER_OF(dwork, struct tps43_drv_data, suspend_work);
+    const struct device *dev = drv_data->dev;
+    const struct tps43_config *config = dev->config;
+
+    // Если управление питанием отключено или таймаут не задан, не делаем ничего
+    if (!config->enable_power_management || config->suspend_timeout_ms <= 0) {
+        return;
+    }
+
+    // Вычисляем время бездействия
+    int32_t now = k_uptime_get_32();
+    int32_t inactive_time = now - drv_data->last_activity_time;
+
+    // Если время бездействия превысило таймаут и устройство не в suspend - переводим в suspend
+    if (inactive_time >= config->suspend_timeout_ms && !drv_data->suspended) {
+        LOG_INF("Автоматический переход в suspend после %d мс бездействия", inactive_time);
+        tps43_set_suspend_internal(dev, true, false);
+    }
+    // Если время бездействия меньше таймаута и устройство в suspend - пробуждаем
+    // (это может произойти, если активность была обнаружена через прерывание RDY)
+    else if (inactive_time < config->suspend_timeout_ms && drv_data->suspended) {
+        LOG_INF("Автоматическое пробуждение из suspend (обнаружена активность)");
+        tps43_set_suspend_internal(dev, false, false);
+    }
+
+    // Планируем следующую проверку через 1 секунду (если таймаут задан)
+    if (config->suspend_timeout_ms > 0) {
+        k_work_schedule(&drv_data->suspend_work, K_MSEC(1000));
+    }
+}
+
+/**
+ * @brief Инициализирует драйвер тачпада TPS43
+ * 
+ * Выполняет полную инициализацию драйвера: проверяет доступность I2C шины,
+ * выполняет аппаратный сброс через GPIO RST (если подключен), ожидает готовности
+ * устройства, конфигурирует регистры тачпада и настраивает прерывания GPIO RDY.
+ * Также инициализирует систему управления питанием при необходимости.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
 static int tps43_init(const struct device *dev) {
 
     struct tps43_drv_data *drv_data = dev->data;
@@ -430,8 +692,20 @@ static int tps43_init(const struct device *dev) {
     }
 
     drv_data->initialized = true;
+    drv_data->suspended = false;
+    drv_data->last_activity_time = k_uptime_get_32();
 
     k_work_init(&drv_data->work, tps43_work_handler);
+    
+    // Инициализируем отложенную работу для автоматического suspend
+    // если включено управление питанием и задан таймаут
+    if (config->enable_power_management && config->suspend_timeout_ms > 0) {
+        k_work_init_delayable(&drv_data->suspend_work, tps43_suspend_work_handler);
+        // Запускаем первую проверку через 1 секунду
+        k_work_schedule(&drv_data->suspend_work, K_MSEC(1000));
+        LOG_INF("Автоматическое управление питанием включено (таймаут: %d мс)", 
+                config->suspend_timeout_ms);
+    }
     
     LOG_INF("Драйвер TPS43 успешно инициализирован");
     return 0;
@@ -441,9 +715,11 @@ static int tps43_init(const struct device *dev) {
 #define TPS43_INIT(inst)                                                                             \
     static struct tps43_drv_data tps43_##inst##_drvdata = {                                          \
         .device_ready = false,                                                                       \
-        .initialized = false,                                                                        \
-        .scroll_active = false,                                                                      \
-        .drag_active = false,                                                                        \
+        .initialized = false,                                                                       \
+        .scroll_active = false,                                                                     \
+        .drag_active = false,                                                                       \
+        .suspended = false,                                                                         \
+        .last_activity_time = 0,                                                                    \
     };                                                                                               \
                                                                                                      \
     static const struct tps43_config tps43_##inst##_config = {                                       \
@@ -461,7 +737,8 @@ static int tps43_init(const struct device *dev) {
         .invert_scroll_y = DT_INST_PROP(inst, invert_scroll_x),                                      \
         .sensitivity = DT_INST_PROP_OR(inst, sensitivity, 100),                                      \
         .scroll_sensitivity = DT_INST_PROP_OR(inst, scroll_sensitivity, 50),                         \
-        .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),             \
+        .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),            \
+        .suspend_timeout_ms = DT_INST_PROP_OR(inst, suspend_timeout_ms, 0),                         \
     };                                                                                               \
                                                                                                      \
     DEVICE_DT_INST_DEFINE(inst, tps43_init, NULL, &tps43_##inst##_drvdata, &tps43_##inst##_config,   \
@@ -470,3 +747,20 @@ static int tps43_init(const struct device *dev) {
 
 
 DT_INST_FOREACH_STATUS_OKAY(TPS43_INIT)
+
+/**
+ * @brief Публичная функция для управления режимом сна тачпада
+ * 
+ * Эта функция используется системой управления питанием ZMK (через tps43_idle_sleeper)
+ * для перевода тачпада в режим сна при переходе клавиатуры в состояние idle/sleep.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param sleep true - перевести в режим сна, false - пробудить
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
+int tps43_set_sleep(const struct device *dev, bool sleep) {
+    if (dev == NULL) {
+        return -EINVAL;
+    }
+    return tps43_set_suspend(dev, sleep);
+}

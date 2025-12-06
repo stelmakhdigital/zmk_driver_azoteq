@@ -3,6 +3,7 @@
 #include <zephyr/device.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/drivers/gpio.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,6 +169,7 @@ struct tps43_config {
     int16_t scroll_sensitivity;
 
     bool enable_power_management;
+    int32_t suspend_timeout_ms;  /* 0 = отключено */
 };
 
 struct tps43_drv_data {
@@ -181,7 +183,11 @@ struct tps43_drv_data {
     bool initialized;
     bool scroll_active;
     bool drag_active;
+    bool suspended;         
+    int32_t last_activity_time; 
 };
+
+int tps43_set_sleep(const struct device *dev, bool sleep);
 
 #ifdef __cplusplus
 }
