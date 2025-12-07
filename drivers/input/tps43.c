@@ -229,7 +229,6 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     }
 
     // Читаем текущее значение регистра SYSTEM_CONTROL_1
-    // ВАЖНО: SUSPEND находится в регистре SYSTEM_CONTROL_1, а не SYSTEM_CONTROL_0!
     uint8_t control_reg = 0;
     ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
     if (ret != 0) {
@@ -261,15 +260,13 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
         drv_data->last_activity_time = k_uptime_get_32();
     }
 
-    // Завершаем окно связи (обязательно после каждой операции I2C)
-    tps43_end_communication_window(dev);
-
 done:
     // Освобождаем семафор, если мы его захватывали
     if (!lock_held) {
         k_sem_give(&drv_data->lock);
     }
-
+    // Завершаем окно связи (обязательно после каждой операции I2C)
+    tps43_end_communication_window(dev);
     return 0;
 }
 
