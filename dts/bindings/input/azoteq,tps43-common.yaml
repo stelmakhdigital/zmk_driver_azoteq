@@ -72,6 +72,11 @@ properties:
     required: false
     description: Включить жест прокрутки
 
+  swipes:
+    type: boolean
+    required: false
+    description: Включить обработку свайпов. При включении отслеживаются свайпы тремя пальцами
+
   invert-x:
     type: boolean
     required: false

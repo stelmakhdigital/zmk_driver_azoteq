@@ -297,6 +297,29 @@ static void tps43_work_handler(struct k_work *work) {
             }
             LOG_INF("Отправка движения: dx=%d, dy=%d", rel_x, rel_y);
 
+            // Обработка свайпов тремя пальцами
+            if (config->swipes) {
+                uint8_t num_fingers = 0;
+                ret = tps43_i2c_read_reg8(dev, TPS43_REG_NUM_FINGERS, &num_fingers);
+                if (ret < 0) {
+                    LOG_ERR("Ошибка чтения NUM_FINGERS: %d", ret);
+                    goto done;
+                }
+                if (num_fingers == 3) {
+                    if (rel_x < 0) {
+                        LOG_INF("Свайп 3 пальцами влево - кнопка 6 мыши");
+                        input_report_key(dev, INPUT_BTN_6, 1, true, K_FOREVER);
+                        input_report_key(dev, INPUT_BTN_6, 0, true, K_FOREVER);
+                    }
+                    if (rel_x > 0) {
+                        LOG_INF("Свайп 3 пальцами вправо - кнопка 7 мыши");
+                        input_report_key(dev, INPUT_BTN_7, 1, true, K_FOREVER);
+                        input_report_key(dev, INPUT_BTN_7, 0, true, K_FOREVER);
+                    }
+                }
+            }
+
+        
             if (is_scroll_active) {
                 // Обработка скролла: оставляем только доминирующую ось
                 if (abs(rel_x) > abs(rel_y)) {
@@ -400,10 +423,14 @@ static int tps43_configure_device(const struct device *dev) {
     }
 
     // включение одиночных жестов на уровне железа
-    if (config->single_tap || config->press_and_hold) {
+    if (config->single_tap || config->press_and_hold || config->swipes) {
         uint8_t single_gestures = 0;
         single_gestures |= config->single_tap ? TPS43_SINGLE_TAP : 0;
         single_gestures |= config->press_and_hold ? TPS43_PRESS_AND_HOLD : 0;
+        single_gestures |= config->swipes ? TPS43_SWIPE_UP : 0;
+        single_gestures |= config->swipes ? TPS43_SWIPE_DOWN : 0;
+        single_gestures |= config->swipes ? TPS43_SWIPE_LEFT : 0;
+        single_gestures |= config->swipes ? TPS43_SWIPE_RIGHT : 0;
         
         ret = tps43_i2c_write_reg8(dev, TPS43_REG_SINGLE_FINGER_GESTURES, single_gestures);
         if (ret != 0) {
@@ -747,11 +774,11 @@ static int tps43_init(const struct device *dev) {
 #define TPS43_INIT(inst)                                                                             \
     static struct tps43_drv_data tps43_##inst##_drvdata = {                                          \
         .device_ready = false,                                                                       \
-        .initialized = false,                                                                       \
-        .scroll_active = false,                                                                     \
-        .drag_active = false,                                                                       \
-        .suspended = false,                                                                         \
-        .last_activity_time = 0,                                                                    \
+        .initialized = false,                                                                        \
+        .scroll_active = false,                                                                      \
+        .drag_active = false,                                                                        \
+        .suspended = false,                                                                          \
+        .last_activity_time = 0,                                                                     \
     };                                                                                               \
                                                                                                      \
     static const struct tps43_config tps43_##inst##_config = {                                       \
@@ -762,6 +789,7 @@ static int tps43_init(const struct device *dev) {
         .press_and_hold = DT_INST_PROP(inst, press_and_hold),                                        \
         .two_finger_tap = DT_INST_PROP(inst, two_finger_tap),                                        \
         .scroll = DT_INST_PROP(inst, scroll),                                                        \
+        .swipes = DT_INST_PROP(inst, swipes),                                                        \
         .invert_x = DT_INST_PROP(inst, invert_x),                                                    \
         .invert_y = DT_INST_PROP(inst, invert_y),                                                    \
         .switch_xy = DT_INST_PROP(inst, switch_xy),                                                  \
@@ -769,9 +797,9 @@ static int tps43_init(const struct device *dev) {
         .invert_scroll_y = DT_INST_PROP(inst, invert_scroll_y),                                      \
         .sensitivity = DT_INST_PROP_OR(inst, sensitivity, 100),                                      \
         .scroll_sensitivity = DT_INST_PROP_OR(inst, scroll_sensitivity, 50),                         \
-        .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),            \
-        .suspend_timeout_ms = DT_INST_PROP_OR(inst, suspend_timeout_ms, 0),                         \
-        .filter_settings = DT_INST_PROP_OR(inst, filter_settings, 0x0F),                            \
+        .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),             \
+        .suspend_timeout_ms = DT_INST_PROP_OR(inst, suspend_timeout_ms, 0),                          \
+        .filter_settings = DT_INST_PROP_OR(inst, filter_settings, 0x0F),                             \
     };                                                                                               \
                                                                                                      \
     DEVICE_DT_INST_DEFINE(inst, tps43_init, NULL, &tps43_##inst##_drvdata, &tps43_##inst##_config,   \
