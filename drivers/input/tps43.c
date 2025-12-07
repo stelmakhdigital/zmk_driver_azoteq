@@ -270,7 +270,7 @@ done:
         k_sem_give(&drv_data->lock);
     }
 
-    return 0
+    return 0;
 }
 
 /**
