@@ -191,6 +191,89 @@ static int tps43_i2c_write_reg8(const struct device *dev, uint16_t reg, uint8_t 
  }
  
 /**
+ * @brief Внутренняя функция для перевода тачпада в режим suspend/resume
+ * 
+ * Управляет регистром SYSTEM_CONTROL_1 (0x0432), устанавливая или снимая бит SUSPEND.
+ * В режиме suspend тачпад переходит в состояние низкого энергопотребления и не обрабатывает
+ * касания до пробуждения.
+ * 
+ * @param dev Указатель на устройство тачпада
+ * @param suspend true - перевести в suspend, false - вывести из suspend
+ * @param lock_held true если семафор уже захвачен (для внутреннего использования)
+ * @return 0 при успехе, отрицательный код ошибки при неудаче
+ */
+static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bool lock_held) {
+    struct tps43_drv_data *drv_data = dev->data;
+    const struct tps43_config *config = dev->config;
+    int ret = 0;
+
+    // Если управление питанием отключено, ничего не делаем
+    if (!config->enable_power_management) {
+        return 0;
+    }
+
+    // Захватываем семафор, если он еще не захвачен
+    if (!lock_held) {
+        if (k_sem_take(&drv_data->lock, K_MSEC(100)) != 0) {
+            LOG_WRN("Не удалось захватить семафор для suspend/resume");
+            return -EBUSY;
+        }
+    }
+
+    // Проверяем, не пытаемся ли установить то же состояние
+    if (drv_data->suspended == suspend) {
+        if (!lock_held) {
+            k_sem_give(&drv_data->lock);
+        }
+        return 0;
+    }
+
+    // Читаем текущее значение регистра SYSTEM_CONTROL_1
+    // ВАЖНО: SUSPEND находится в регистре SYSTEM_CONTROL_1, а не SYSTEM_CONTROL_0!
+    uint8_t control_reg = 0;
+    ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+    if (ret != 0) {
+        LOG_ERR("Ошибка чтения регистра SYSTEM_CONTROL_1: %d", ret);
+        goto done;
+    }
+
+    // Устанавливаем или снимаем бит SUSPEND
+    if (suspend) {
+        control_reg |= TPS43_SUSPEND;
+        LOG_INF("Перевод тачпада в режим suspend (низкое энергопотребление)");
+    } else {
+        control_reg &= ~TPS43_SUSPEND;
+        LOG_INF("Пробуждение тачпада из режима suspend");
+    }
+
+    // Записываем обновленное значение регистра
+    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
+    if (ret != 0) {
+        LOG_ERR("Ошибка записи регистра SYSTEM_CONTROL_1: %d", ret);
+        goto done;
+    }
+
+    // Обновляем внутреннее состояние
+    drv_data->suspended = suspend;
+    
+    // Если пробуждаем, обновляем время активности
+    if (!suspend) {
+        drv_data->last_activity_time = k_uptime_get_32();
+    }
+
+    // Завершаем окно связи (обязательно после каждой операции I2C)
+    tps43_end_communication_window(dev);
+
+done:
+    // Освобождаем семафор, если мы его захватывали
+    if (!lock_held) {
+        k_sem_give(&drv_data->lock);
+    }
+
+    return 0
+}
+
+/**
  * @brief Основной обработчик работы для обработки событий тачпада
  * 
  * Выполняется при получении прерывания от тачпада (RDY pin).
@@ -524,90 +607,6 @@ static int check_reset_and_reconfigure(const struct device *dev) {
     drv_data->device_ready = true;
     
     return 0;
-}
-
-
-/**
- * @brief Внутренняя функция для перевода тачпада в режим suspend/resume
- * 
- * Управляет регистром SYSTEM_CONTROL_1 (0x0432), устанавливая или снимая бит SUSPEND.
- * В режиме suspend тачпад переходит в состояние низкого энергопотребления и не обрабатывает
- * касания до пробуждения.
- * 
- * @param dev Указатель на устройство тачпада
- * @param suspend true - перевести в suspend, false - вывести из suspend
- * @param lock_held true если семафор уже захвачен (для внутреннего использования)
- * @return 0 при успехе, отрицательный код ошибки при неудаче
- */
-static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bool lock_held) {
-    struct tps43_drv_data *drv_data = dev->data;
-    const struct tps43_config *config = dev->config;
-    int ret = 0;
-
-    // Если управление питанием отключено, ничего не делаем
-    if (!config->enable_power_management) {
-        return 0;
-    }
-
-    // Захватываем семафор, если он еще не захвачен
-    if (!lock_held) {
-        if (k_sem_take(&drv_data->lock, K_MSEC(100)) != 0) {
-            LOG_WRN("Не удалось захватить семафор для suspend/resume");
-            return -EBUSY;
-        }
-    }
-
-    // Проверяем, не пытаемся ли установить то же состояние
-    if (drv_data->suspended == suspend) {
-        if (!lock_held) {
-            k_sem_give(&drv_data->lock);
-        }
-        return 0;
-    }
-
-    // Читаем текущее значение регистра SYSTEM_CONTROL_1
-    // ВАЖНО: SUSPEND находится в регистре SYSTEM_CONTROL_1, а не SYSTEM_CONTROL_0!
-    uint8_t control_reg = 0;
-    ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
-    if (ret != 0) {
-        LOG_ERR("Ошибка чтения регистра SYSTEM_CONTROL_1: %d", ret);
-        goto done;
-    }
-
-    // Устанавливаем или снимаем бит SUSPEND
-    if (suspend) {
-        control_reg |= TPS43_SUSPEND;
-        LOG_INF("Перевод тачпада в режим suspend (низкое энергопотребление)");
-    } else {
-        control_reg &= ~TPS43_SUSPEND;
-        LOG_INF("Пробуждение тачпада из режима suspend");
-    }
-
-    // Записываем обновленное значение регистра
-    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
-    if (ret != 0) {
-        LOG_ERR("Ошибка записи регистра SYSTEM_CONTROL_1: %d", ret);
-        goto done;
-    }
-
-    // Обновляем внутреннее состояние
-    drv_data->suspended = suspend;
-    
-    // Если пробуждаем, обновляем время активности
-    if (!suspend) {
-        drv_data->last_activity_time = k_uptime_get_32();
-    }
-
-    // Завершаем окно связи (обязательно после каждой операции I2C)
-    tps43_end_communication_window(dev);
-
-done:
-    // Освобождаем семафор, если мы его захватывали
-    if (!lock_held) {
-        k_sem_give(&drv_data->lock);
-    }
-
-    return 0
 }
 
 /**
