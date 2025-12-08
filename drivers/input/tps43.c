@@ -28,13 +28,7 @@ LOG_MODULE_REGISTER(tps43, CONFIG_INPUT_LOG_LEVEL);
  */
 static void tps43_end_communication_window(const struct device *dev) {
     const struct tps43_config *config = dev->config;
-    struct tps43_drv_data *drv_data = dev->data;
     uint8_t end_buf[2];
-
-    // В suspend режиме устройство не отвечает на I2C запросы
-    if (drv_data->suspended) {
-        return;
-    }
 
     sys_put_be16(TPS43_REG_END_COMM_WINDOW, end_buf);
 
@@ -146,7 +140,7 @@ static int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *
     
     ret = i2c_write_read_dt(&config->i2c_bus, reg_buf, sizeof(reg_buf), val, 1);
     if (ret < 0) {
-        LOG_ERR("Ошибка записи регистра 0x%04x: %d", reg, ret);
+        LOG_ERR("Ошибка чтения регистра 0x%04x: %d", reg, ret);
         return ret;
     }
     
@@ -234,72 +228,78 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
         return 0;
     }
 
-    if (!device_is_ready(config->i2c_bus.bus)) {
-        LOG_DBG("I2C шина не доступна для suspend/resume операций");
-        drv_data->suspended = suspend;
-        if (!suspend) {
-            drv_data->last_activity_time = k_uptime_get_32();
+    // Отключаем прерывания RDY при переходе в suspend (до любых I2C операций)
+    // Это предотвращает race condition когда RDY срабатывает между попыткой suspend и установкой признака
+    if (suspend && config->rdy_gpio.port != NULL) {
+        ret = gpio_pin_interrupt_configure_dt(&config->rdy_gpio, GPIO_INT_DISABLE);
+        if (ret == 0) {
+            LOG_INF("Прерывания RDY отключены перед suspend");
         }
-        goto done;
+    }
+
+    uint8_t control_reg = 0;
+    
+    // При выходе из suspend первая транзакция вернет NACK (п.7.3.1)
+    if (drv_data->suspended && !suspend) {
+        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+        k_sleep(K_MSEC(200));
+        LOG_INF("I²C Wake: устройство пробуждено из suspend");
+    }
+    
+    if (!drv_data->suspended) {
+        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+        if (ret != 0) {
+            // Если ошибка -5 (EIO) при попытке перевести в suspend - устройство уже в suspend
+            if (ret == -EIO && suspend) {
+                LOG_INF("Устройство уже в suspend (ошибка I2C)");
+                drv_data->suspended = true;
+                ret = 0;
+                goto done;
+            }
+            LOG_ERR("Ошибка чтения SYSTEM_CONTROL_1: %d", ret);
+            goto done;
+        }
     }
 
     if (suspend) {
-        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
-        if (ret != 0) {
-            LOG_DBG("Не удалось прочитать SYSTEM_CONTROL_1 перед suspend (устройство может быть недоступно): %d", ret);
-            drv_data->suspended = true;
-            ret = 0; // Не считаем это ошибкой
-            goto done;
-        }
-
         control_reg |= TPS43_SUSPEND;
-        LOG_INF("Перевод тачпада в режим suspend (низкое энергопотребление)");
-        
-        ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
-        if (ret != 0) {
-            LOG_DBG("Не удалось записать SYSTEM_CONTROL_1 для suspend (устройство может быть уже в suspend): %d", ret);
-            drv_data->suspended = true;
-            ret = 0; // Не считаем это ошибкой
-            goto done;
-        }
-        
-        drv_data->suspended = true;
+        LOG_INF("Перевод в suspend (низкое энергопотребление)");
     } else {
-        // Пробуждение из suspend
-        uint8_t control_reg = 0;
-        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
-        if (ret != 0) {
-            // При пробуждении ошибка может быть из-за того, что I2C шина еще в sleep
-            LOG_DBG("Ошибка чтения SYSTEM_CONTROL_1 при пробуждении: %d (I2C может быть в sleep)", ret);
-            drv_data->suspended = false;
-            drv_data->last_activity_time = k_uptime_get_32();
+        control_reg &= ~TPS43_SUSPEND;
+        LOG_INF("Выход из suspend");
+    }
+
+    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
+    if (ret != 0) {
+        if (ret == -EIO && suspend) {
+            LOG_INF("Не удалось записать suspend, устройство уже в suspend");
+            drv_data->suspended = true;
             ret = 0;
             goto done;
         }
+        LOG_ERR("Ошибка записи SYSTEM_CONTROL_1: %d", ret);
+        goto done;
+    }
 
-        control_reg &= ~TPS43_SUSPEND;
-        LOG_INF("Пробуждение тачпада из режима suspend");
-        
-        ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
-        if (ret != 0) {
-            LOG_DBG("Ошибка записи SYSTEM_CONTROL_1 при пробуждении: %d", ret);
-            drv_data->suspended = false;
-            drv_data->last_activity_time = k_uptime_get_32();
-            ret = 0; // Продолжаем работу
-            goto done;
+    drv_data->suspended = suspend;
+    
+    // Включаем прерывания RDY после resume
+    if (!suspend && config->rdy_gpio.port != NULL) {
+        ret = gpio_pin_interrupt_configure_dt(&config->rdy_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+        if (ret == 0) {
+            LOG_INF("Прерывания RDY включены");
         }
-        
-        drv_data->suspended = false;
+    }
+    
+    if (!suspend) {
         drv_data->last_activity_time = k_uptime_get_32();
     }
 
 done:
-    if (ret == 0) {
-        tps43_end_communication_window(dev);
-    }
     if (!lock_held) {
         k_sem_give(&drv_data->lock);
     }
+    tps43_end_communication_window(dev);
     return ret;
 }
 
@@ -320,37 +320,26 @@ static void tps43_work_handler(struct k_work *work) {
     struct tps43_drv_data *drv_data = CONTAINER_OF(work, struct tps43_drv_data, work);
     const struct device *dev = drv_data->dev;
     const struct tps43_config *config = dev->config;
+    bool is_scroll_active = drv_data->scroll_active;
+    bool is_drag_active = drv_data->drag_active;
     int ret;
+    
+    // Если устройство в suspend, игнорируем прерывание (RDY должен быть отключен)
+    if (drv_data->suspended) {
+        LOG_WRN("Прерывание RDY в suspend режиме - игнорируем");
+        return;
+    }
+    
+    drv_data->last_activity_time = k_uptime_get_32();
 
     // Захватываем семафор для защиты всех операций I2C от прерывания
     // Это предотвращает конфликты при одновременном доступе к тачпаду
     k_sem_take(&drv_data->lock, K_FOREVER);
 
-    // Обновляем время последней активности для управления питанием
-    drv_data->last_activity_time = k_uptime_get_32();
-    
-    // Если устройство было в suspend, пробуждаем его
-    // Используем lock_held=true, так как семафор уже захвачен
-    if (drv_data->suspended && config->enable_power_management) {
-        tps43_set_suspend_internal(dev, false, true);
-        if (drv_data->suspended) {
-            LOG_DBG("Устройство все еще в suspend, пропускаем обработку событий");
-            goto done;
-        }
-    }
-
-    // Определяем события
-    bool is_scroll_active = drv_data->scroll_active;
-    bool is_drag_active = drv_data->drag_active;
-
     uint8_t sys_info = 0;
     ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_INFO_1, &sys_info);
     if (ret < 0) {
-        if (drv_data->suspended) {
-            LOG_DBG("Устройство в suspend, пропускаем чтение регистров");
-        } else {
-            LOG_ERR("Ошибка чтения системной информации: %d", ret);
-        }
+        LOG_ERR("Ошибка чтения системной информации: %d", ret);
         goto done;
     }
 
