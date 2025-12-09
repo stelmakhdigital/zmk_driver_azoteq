@@ -34,12 +34,6 @@ properties:
       
       Значения могут быть объединены с помощью побитового ИЛИ (например, 0x01 | 0x02 = 0x03).
 
-  suspend-timeout-ms:
-    type: int
-    required: false
-    default: 30000
-    description: Таймаут в миллисекундах перед переходом в режим приостановки (0 для отключения)
-
   sensitivity:
     type: int
     required: false

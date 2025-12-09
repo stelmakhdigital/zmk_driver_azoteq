@@ -129,9 +129,10 @@ static int tps43_i2c_write_reg16(const struct device *dev, uint16_t reg, uint16_
  * @param dev Указатель на устройство тачпада
  * @param reg Адрес регистра (16-битный)
  * @param val Указатель на переменную для сохранения прочитанного значения
+ * @param without_err Признак логирования ошибки или ожидаемое поведение
  * @return 0 при успехе, отрицательный код ошибки при неудаче
  */
-static int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *val)
+static int tps43_i2c_read_reg8_w_err(const struct device *dev, uint16_t reg, uint8_t *val, bool without_err)
 {
     const struct tps43_config *config = dev->config;
     // формирует 2-байтовый адрес регистра: (MSB, LSB)
@@ -139,12 +140,19 @@ static int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *
     int ret;
     
     ret = i2c_write_read_dt(&config->i2c_bus, reg_buf, sizeof(reg_buf), val, 1);
-    if (ret < 0) {
-        LOG_ERR("Ошибка чтения регистра 0x%04x: %d", reg, ret);
+    if (ret != 0) {
+        if (without_err) {
+            LOG_INF("Ожидаемое завершение чтение регистра 0x%04x: %d", reg, ret);
+        } else if (ret != -EIO) {
+            LOG_ERR("Ошибка чтения регистра 0x%04x: %d", reg, ret);
+        }
         return ret;
     }
-    
-    return 0;
+}
+
+static inline int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *val)
+{
+    return tps43_i2c_read_reg8_w_err(dev, reg, val, false);
 }
 
 /**
@@ -220,14 +228,6 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
         }
     }
 
-    // Проверяем, не пытаемся ли установить то же состояние
-    if (drv_data->suspended == suspend) {
-        if (!lock_held) {
-            k_sem_give(&drv_data->lock);
-        }
-        return 0;
-    }
-
     // Отключаем прерывания RDY при переходе в suspend (до любых I2C операций)
     // Это предотвращает race condition когда RDY срабатывает между попыткой suspend и установкой признака
     if (suspend && config->rdy_gpio.port != NULL) {
@@ -241,13 +241,13 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     
     // При выходе из suspend первая транзакция вернет NACK (п.7.3.1)
     if (drv_data->suspended && !suspend) {
-        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, true);
         k_sleep(K_MSEC(200));
         LOG_INF("I²C Wake: устройство пробуждено из suspend");
     }
     
     if (!drv_data->suspended) {
-        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, true);
         if (ret != 0) {
             // Если ошибка -5 (EIO) при попытке перевести в suspend - устройство уже в suspend
             if (ret == -EIO && suspend) {
@@ -290,10 +290,6 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
             LOG_INF("Прерывания RDY включены");
         }
     }
-    
-    if (!suspend) {
-        drv_data->last_activity_time = k_uptime_get_32();
-    }
 
 done:
     if (!lock_held) {
@@ -330,8 +326,6 @@ static void tps43_work_handler(struct k_work *work) {
         return;
     }
     
-    drv_data->last_activity_time = k_uptime_get_32();
-
     // Захватываем семафор для защиты всех операций I2C от прерывания
     // Это предотвращает конфликты при одновременном доступе к тачпаду
     k_sem_take(&drv_data->lock, K_FOREVER);
@@ -646,50 +640,6 @@ static int check_reset_and_reconfigure(const struct device *dev) {
 static int tps43_set_suspend(const struct device *dev, bool suspend) {
     return tps43_set_suspend_internal(dev, suspend, false);
 }
- 
-/**
- * @brief Обработчик отложенной работы для автоматического перевода в suspend
- * 
- * Эта функция периодически проверяет время бездействия тачпада и автоматически
- * переводит его в режим suspend, если прошло достаточно времени без активности.
- * Также пробуждает тачпад, если обнаружена активность.
- * 
- * Работает только если suspend_timeout_ms > 0 и enable_power_management = true.
- * 
- * @param work Указатель на отложенную работу
- */
-static void tps43_suspend_work_handler(struct k_work *work) {
-    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
-    struct tps43_drv_data *drv_data = CONTAINER_OF(dwork, struct tps43_drv_data, suspend_work);
-    const struct device *dev = drv_data->dev;
-    const struct tps43_config *config = dev->config;
-
-    // Если управление питанием отключено или таймаут не задан, не делаем ничего
-    if (!config->enable_power_management || config->suspend_timeout_ms <= 0) {
-        return;
-    }
-
-    // Вычисляем время бездействия
-    int32_t now = k_uptime_get_32();
-    int32_t inactive_time = now - drv_data->last_activity_time;
-
-    // Если время бездействия превысило таймаут и устройство не в suspend - переводим в suspend
-    if (inactive_time >= config->suspend_timeout_ms && !drv_data->suspended) {
-        LOG_INF("Автоматический переход в suspend после %d мс бездействия", inactive_time);
-        tps43_set_suspend(dev, true);
-    }
-    // Если время бездействия меньше таймаута и устройство в suspend - пробуждаем
-    // (это может произойти, если активность была обнаружена через прерывание RDY)
-    else if (inactive_time < config->suspend_timeout_ms && drv_data->suspended) {
-        LOG_INF("Автоматическое пробуждение из suspend (обнаружена активность)");
-        tps43_set_suspend(dev, false);
-    }
-
-    // Планируем следующую проверку через 10 секунд (если таймаут задан)
-    if (config->suspend_timeout_ms > 0) {
-        k_work_schedule(&drv_data->suspend_work, K_MSEC(10000));
-    }
-}
 
 /**
  * @brief Инициализирует драйвер тачпада TPS43
@@ -773,7 +723,6 @@ static int tps43_init(const struct device *dev) {
 
     drv_data->initialized = true;
     drv_data->suspended = false;
-    drv_data->last_activity_time = k_uptime_get_32();
 
     // Инициализируем семафор для защиты операций I2C
     // Первый параметр - начальное количество (1 = доступен)
@@ -781,16 +730,6 @@ static int tps43_init(const struct device *dev) {
     k_sem_init(&drv_data->lock, 1, 1);
 
     k_work_init(&drv_data->work, tps43_work_handler);
-    
-    // Инициализируем отложенную работу для автоматического suspend
-    // если включено управление питанием и задан таймаут
-    if (config->enable_power_management && config->suspend_timeout_ms > 0) {
-        k_work_init_delayable(&drv_data->suspend_work, tps43_suspend_work_handler);
-        // Запускаем первую проверку через 10 секунд
-        k_work_schedule(&drv_data->suspend_work, K_MSEC(10000));
-        LOG_INF("Автоматическое управление питанием включено (таймаут: %d мс)", 
-                config->suspend_timeout_ms);
-    }
     
     LOG_INF("Драйвер TPS43 успешно инициализирован");
     return 0;
@@ -804,7 +743,6 @@ static int tps43_init(const struct device *dev) {
         .scroll_active = false,                                                                      \
         .drag_active = false,                                                                        \
         .suspended = false,                                                                          \
-        .last_activity_time = 0,                                                                     \
     };                                                                                               \
                                                                                                      \
     static const struct tps43_config tps43_##inst##_config = {                                       \
@@ -824,7 +762,6 @@ static int tps43_init(const struct device *dev) {
         .sensitivity = DT_INST_PROP_OR(inst, sensitivity, 100),                                      \
         .scroll_sensitivity = DT_INST_PROP_OR(inst, scroll_sensitivity, 50),                         \
         .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),             \
-        .suspend_timeout_ms = DT_INST_PROP_OR(inst, suspend_timeout_ms, 0),                          \
         .filter_settings = DT_INST_PROP_OR(inst, filter_settings, 0x0F),                             \
     };                                                                                               \
                                                                                                      \
