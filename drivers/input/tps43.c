@@ -244,9 +244,15 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
         ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, true);
         k_sleep(K_MSEC(200));
         LOG_INF("I²C Wake: устройство пробуждено из suspend");
-    }
-    
-    if (!drv_data->suspended) {
+        
+        // После пробуждения читаем регистр повторно
+        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
+        if (ret != 0) {
+            LOG_ERR("Ошибка чтения SYSTEM_CONTROL_1 после wake: %d", ret);
+            goto done;
+        }
+    } else if (!drv_data->suspended) {
+        // Читаем текущее значение только если не в suspend
         ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, true);
         if (ret != 0) {
             // Если ошибка -5 (EIO) при попытке перевести в suspend - устройство уже в suspend
