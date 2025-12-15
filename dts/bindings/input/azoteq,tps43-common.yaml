@@ -71,16 +71,6 @@ properties:
     required: false
     description: Включить обработку свайпов. При включении отслеживаются свайпы тремя пальцами
 
-  invert-x:
-    type: boolean
-    required: false
-    description: Инвертировать ось X
-
-  invert-y:
-    type: boolean
-    required: false
-    description: Инвертировать ось Y
-
   switch-xy:
     type: boolean
     required: false
@@ -93,20 +83,16 @@ properties:
 
   invert-x:
     type: boolean
-    description: |
-      Если присутствует, инвертировать значения координаты X.
+    description: Если присутствует, инвертировать значения координаты X.
       
   invert-y:
     type: boolean
-    description: |
-      Если присутствует, инвертировать значения координаты Y.
+    description: Если присутствует, инвертировать значения координаты Y.
       
   invert-scroll-x:
     type: boolean
-    description: |
-      Если присутствует, инвертировать значения прокрутки по X.
+    description: Если присутствует, инвертировать значения скролла по X.
             
   invert-scroll-y:
     type: boolean
-    description: |
-      Если присутствует, инвертировать значения прокрутки по Y.
+    description: Если присутствует, инвертировать значения скролла по Y.

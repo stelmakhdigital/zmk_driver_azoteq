@@ -129,10 +129,10 @@ static int tps43_i2c_write_reg16(const struct device *dev, uint16_t reg, uint16_
  * @param dev Указатель на устройство тачпада
  * @param reg Адрес регистра (16-битный)
  * @param val Указатель на переменную для сохранения прочитанного значения
- * @param without_err Признак логирования ошибки или ожидаемое поведение
+ * @param with_err Признак логирования ошибки или ожидаемое поведение
  * @return 0 при успехе, отрицательный код ошибки при неудаче
  */
-static int tps43_i2c_read_reg8_w_err(const struct device *dev, uint16_t reg, uint8_t *val, bool without_err)
+static int tps43_i2c_read_reg8_w_err(const struct device *dev, uint16_t reg, uint8_t *val, bool with_err)
 {
     const struct tps43_config *config = dev->config;
     // формирует 2-байтовый адрес регистра: (MSB, LSB)
@@ -141,10 +141,10 @@ static int tps43_i2c_read_reg8_w_err(const struct device *dev, uint16_t reg, uin
     
     ret = i2c_write_read_dt(&config->i2c_bus, reg_buf, sizeof(reg_buf), val, 1);
     if (ret != 0) {
-        if (without_err) {
-            LOG_INF("Ожидаемое завершение чтение регистра 0x%04x: %d", reg, ret);
-        } else if (ret != -EIO) {
+        if (with_err) {
             LOG_ERR("Ошибка чтения регистра 0x%04x: %d", reg, ret);
+        } else {
+            LOG_INF("Ожидаемое завершение чтение регистра 0x%04x: %d", reg, ret);
         }
         return ret;
     }
@@ -152,7 +152,7 @@ static int tps43_i2c_read_reg8_w_err(const struct device *dev, uint16_t reg, uin
 
 static inline int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *val)
 {
-    return tps43_i2c_read_reg8_w_err(dev, reg, val, false);
+    return tps43_i2c_read_reg8_w_err(dev, reg, val, true);
 }
 
 /**
@@ -241,19 +241,16 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     
     // При выходе из suspend первая транзакция вернет NACK (п.7.3.1)
     if (drv_data->suspended && !suspend) {
-        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, true);
+        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, false);
         k_sleep(K_MSEC(200));
-        LOG_INF("I²C Wake: устройство пробуждено из suspend");
+        LOG_INF("I2C Wake: устройство пробуждено из suspend");
         
         // После пробуждения читаем регистр повторно
-        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
-        if (ret != 0) {
-            LOG_ERR("Ошибка чтения SYSTEM_CONTROL_1 после wake: %d", ret);
-            goto done;
-        }
+        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, false);
+
     } else if (!drv_data->suspended) {
         // Читаем текущее значение только если не в suspend
-        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, true);
+        ret = tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, false);
         if (ret != 0) {
             // Если ошибка -5 (EIO) при попытке перевести в suspend - устройство уже в suspend
             if (ret == -EIO && suspend) {
@@ -288,7 +285,8 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
     }
 
     drv_data->suspended = suspend;
-    
+
+done:
     // Включаем прерывания RDY после resume
     if (!suspend && config->rdy_gpio.port != NULL) {
         ret = gpio_pin_interrupt_configure_dt(&config->rdy_gpio, GPIO_INT_EDGE_TO_ACTIVE);
@@ -296,12 +294,10 @@ static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bo
             LOG_INF("Прерывания RDY включены");
         }
     }
-
-done:
+    tps43_end_communication_window(dev);
     if (!lock_held) {
         k_sem_give(&drv_data->lock);
     }
-    tps43_end_communication_window(dev);
     return ret;
 }
 
