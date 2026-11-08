@@ -1,6 +1,7 @@
 config INPUT_TPS43
     bool "Azoteq TPS43 I2C Touchpad Input Device"
     default y
+    depends on DT_HAS_AZOTEQ_TPS43_ENABLED
     depends on I2C
     depends on INPUT
     help
@@ -15,4 +16,4 @@ config INPUT_TPS43_INIT_PRIORITY
     help
       Приоритет инициализации драйвера устройства.
 
-endif # ZMK_SENSOR_TPS43
+endif # INPUT_TPS43
